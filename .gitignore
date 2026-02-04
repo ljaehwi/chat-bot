@@ -1,0 +1,24 @@
+# 설정 및 보안 (최우선)
+.env
+*.로그
+*.config
+
+# Python 가상환경 및 캐시
+agent/
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE 및 OS 설정
+.vscode/
+.idea/
+.ds_store
+Thumbs.db
+
+# 배포 및 빌드 결과물
+dist/
+build/
+*.spec

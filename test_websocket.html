@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Agent WebSocket Test</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #messages { border: 1px solid #ccc; height: 400px; overflow-y: scroll; padding: 10px; margin: 10px 0; }
+        #messageInput { width: 70%; padding: 5px; }
+        #sendButton { padding: 5px 10px; }
+        .log { color: #666; font-style: italic; }
+        .error { color: red; }
+        .token { color: #333; }
+        .thinking { color: #999; font-style: italic; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <h1>AI Agent WebSocket Test</h1>
+    
+    <div>
+        <label>User ID: <input type="number" id="userId" value="1" min="1"></label>
+    </div>
+    
+    <div>
+        <input type="text" id="messageInput" placeholder="메시지를 입력하세요..." />
+        <button id="sendButton">전송</button>
+        <button id="connectButton">연결</button>
+        <button id="disconnectButton">연결 해제</button>
+    </div>
+    
+    <div id="status">연결 상태: 연결 안됨</div>
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+        const messages = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const connectButton = document.getElementById('connectButton');
+        const disconnectButton = document.getElementById('disconnectButton');
+        const status = document.getElementById('status');
+        const userId = document.getElementById('userId');
+
+        function addMessage(content, className = '') {
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = content;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket('ws://localhost:8000/ws/chat');
+            
+            ws.onopen = function() {
+                status.textContent = '연결 상태: 연결됨';
+                addMessage('✅ WebSocket 연결 성공', 'log');
+                sendButton.disabled = false;
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'node_start') {
+                    addMessage(data.content, 'log');
+                } else if (data.type === 'node_end') {
+                    addMessage(data.content, 'log');
+                } else if (data.type === 'tool_start') {
+                    addMessage(data.content, 'log');
+                } else if (data.type === 'tool_end') {
+                    addMessage(data.content, 'log');
+                } else if (data.type === 'thinking') {
+                    // 생각 중일 때는 ... 표시
+                    const thinkingDiv = document.getElementById('thinking');
+                    if (!thinkingDiv) {
+                        const div = document.createElement('div');
+                        div.id = 'thinking';
+                        div.className = 'thinking';
+                        div.textContent = '생각 중...';
+                        messages.appendChild(div);
+                    }
+                } else if (data.type === 'final_answer') {
+                    // 생각 중 표시 제거
+                    const thinkingDiv = document.getElementById('thinking');
+                    if (thinkingDiv) {
+                        thinkingDiv.remove();
+                    }
+                    addMessage(data.content, 'token');
+                } else if (data.type === 'error') {
+                    addMessage('❌ ' + data.content, 'error');
+                } else if (data.type === 'end') {
+                    addMessage('--- 응답 완료 ---', 'log');
+                }
+            };
+
+            ws.onclose = function() {
+                status.textContent = '연결 상태: 연결 안됨';
+                addMessage('❌ WebSocket 연결 종료', 'log');
+                sendButton.disabled = true;
+            };
+
+            ws.onerror = function(error) {
+                addMessage('❌ WebSocket 오류: ' + error, 'error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('❌ WebSocket이 연결되지 않았습니다', 'error');
+                return;
+            }
+
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            const payload = {
+                message: message,
+                user_id: parseInt(userId.value)
+            };
+
+            addMessage('📤 전송: ' + message, 'log');
+            ws.send(JSON.stringify(payload));
+            messageInput.value = '';
+        }
+
+        // Event listeners
+        connectButton.onclick = connect;
+        disconnectButton.onclick = disconnect;
+        sendButton.onclick = sendMessage;
+        
+        messageInput.onkeypress = function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        };
+
+        // Auto connect on load
+        connect();
+    </script>
+</body>
+</html>

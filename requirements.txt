@@ -1,0 +1,26 @@
+# Web & Server
+fastapi
+uvicorn
+websockets
+
+# Data & Environment
+pydantic
+python-dotenv
+sqlmodel
+
+# Database Drivers
+asyncpg
+aiosqlite
+
+# LangChain & LangGraph Ecosystem
+langchain
+langchain-community
+langgraph
+langchain-google-genai
+google-genai
+langchain-ollama
+
+# Tools & Others
+mcp-client
+tavily-python
+ollama
