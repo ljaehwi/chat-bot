@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # 2. Internal Imports
@@ -207,15 +207,39 @@ async def websocket_endpoint(websocket: WebSocket):
                 }
             }
 
-            # 3. Setup initial state (without db_session to avoid pickle error)
-            initial_state = {
-                "messages": [HumanMessage(content=user_message)],
-                "user_id": user_id,
-                "log": [],
-            }
-
             # Get a new DB session for this interaction
             async with AsyncSession(async_engine) as session:
+                # 0. Check DB for an existing matching answer
+                existing_answer = await crud.find_similar_answer(session, user_message)
+                if existing_answer:
+                    await websocket.send_json({
+                        "type": "final_answer",
+                        "content": existing_answer.content
+                    })
+                    await websocket.send_json({"type": "end"})
+                    # Save user message + reused assistant answer
+                    await crud.create_chat_history(session, intent="db_cache", role="user", content=user_message)
+                    await crud.create_chat_history(session, intent="db_cache", role="assistant", content=existing_answer.content)
+                    continue
+
+                # 1. Load recent chat history for context (last 5 messages)
+                recent_history = await crud.get_recent_chat_history(session, limit=5)
+                recent_history = list(reversed(recent_history)) if recent_history else []
+
+                context_messages = []
+                for item in recent_history:
+                    if item.role == "user":
+                        context_messages.append(HumanMessage(content=item.content))
+                    else:
+                        context_messages.append(AIMessage(content=item.content))
+
+                # 3. Setup initial state (without db_session to avoid pickle error)
+                initial_state = {
+                    "messages": context_messages + [HumanMessage(content=user_message)],
+                    "user_id": user_id,
+                    "log": [],
+                }
+
                 # Save user message to DB
                 # TODO: The 'intent' is not yet classified here. We'll use a placeholder.
                 await crud.create_chat_history(session, intent="unknown", role="user", content=user_message)
@@ -270,10 +294,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         # The final answer is now stored in the 'final_answer' key
                         final_answer_content = final_state.values.get("final_answer", final_answer_content)
 
-                    # Send the final answer
+                    # Send the final answer with tool metadata
+                    tool_results = final_state.values.get("tool_results", []) if final_state else []
                     await websocket.send_json({
                         "type": "final_answer", 
-                        "content": final_answer_content
+                        "content": final_answer_content,
+                        "tool_results": tool_results
                     })
 
                     # Save AI message to DB

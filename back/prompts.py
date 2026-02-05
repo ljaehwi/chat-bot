@@ -35,6 +35,66 @@ Input: \"Explain code logic\" -> Chat
 
 Response (ONLY Category Name):"""
 
+# --- 2.5. Tool Planner Node ---
+TOOL_PLANNER_SYSTEM_PROMPT = "You are a tool planner. Output ONLY JSON."
+TOOL_PLANNER_PROMPT = """Create a tool execution plan for the user's request.
+
+<User Intent>
+{user_intent}
+</User Intent>
+
+<User Message>
+{user_message}
+</User Message>
+
+<Available Tools>
+{tools_json}
+</Available Tools>
+
+<Rules>
+1. Output ONLY a JSON array.
+2. Each item must be: {{ "name": "tool_name", "args": {{ ... }} }}
+3. Use 0-3 tools. Use an empty array [] if no tool is needed.
+4. Use the tool's argument schema if provided.
+5. Do NOT invent tools or arguments.
+</Rules>
+
+JSON Array Only:
+"""
+
+# --- 2.6. Tool Step Planner Node ---
+TOOL_STEP_PLANNER_SYSTEM_PROMPT = "You are a step-by-step tool planner. Output ONLY JSON."
+TOOL_STEP_PLANNER_PROMPT = """Decide the NEXT single tool call.
+
+<User Intent>
+{user_intent}
+</User Intent>
+
+<User Message>
+{user_message}
+</User Message>
+
+<Recent Tool Results>
+{recent_results}
+</Recent Tool Results>
+
+<Available Tools>
+{tools_json}
+</Available Tools>
+
+<Rules>
+1. Output ONLY a JSON object.
+2. Either choose to call ONE tool or finish.
+3. If calling a tool, output:
+   {{ "action": "tool", "name": "tool_name", "args": {{ ... }} }}
+4. If no more tools are needed, output:
+   {{ "action": "done" }}
+5. Do NOT invent tools or arguments.
+</Rules>
+
+JSON Object Only:
+"""
+
 # --- 3. Profile Extractor Node ---
 PROFILE_EXTRACTOR_SYSTEM_PROMPT = "You are a profile information extractor. Output ONLY JSON."
 PROFILE_EXTRACTOR_PROMPT = """Extract personal information from the user's statement into a JSON object.

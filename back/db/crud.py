@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from datetime import date, datetime
 
 from sqlalchemy import cast, Date
@@ -35,6 +35,35 @@ async def get_chat_history(session: AsyncSession, target_date: date, limit: int 
     )
     result = await session.execute(statement)
     return result.scalars().all()
+
+
+async def get_recent_chat_history(session: AsyncSession, limit: int = 5) -> List[models.ChatHistory]:
+    """
+    Retrieves the most recent chat messages (across all dates).
+    """
+    statement = (
+        select(models.ChatHistory)
+        .order_by(models.ChatHistory.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(statement)
+    return result.scalars().all()
+
+
+async def find_similar_answer(session: AsyncSession, query: str) -> Optional[models.ChatHistory]:
+    """
+    Finds a recent assistant answer that likely matches the query.
+    Naive keyword match using ILIKE.
+    """
+    statement = (
+        select(models.ChatHistory)
+        .where(models.ChatHistory.role == "assistant")
+        .where(models.ChatHistory.content.ilike(f"%{query}%"))
+        .order_by(models.ChatHistory.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(statement)
+    return result.scalars().first()
 
 
 async def create_knowledge_distillation(

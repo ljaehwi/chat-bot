@@ -2,13 +2,13 @@ from functools import partial
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver 
+from langgraph.checkpoint.memory import MemorySaver
 
 from .state import AgentState
-# 파일명에 맞춰 노드 임포트
 from .nodes.clarify_intent import clarify_intent
 from .nodes.initial_planner import initial_planner
-from .nodes.update_user_profile import update_user_profile # 추가
+from .nodes.db_search import db_search
+from .nodes.update_user_profile import update_user_profile
 from .nodes.execute_tools import execute_tools
 from .nodes.synthesize_answer import synthesize_answer
 from .nodes.check_with_8b import check_with_8b
@@ -24,27 +24,39 @@ def route_after_intent(state: AgentState) -> str:
     """Routes to the correct node based on the classified user intent."""
     intent = state.get("user_intent", "Chat")
     if intent == "Profile":
-        print("  > डिसीजन: Updating User Profile")
+        print("  > ?덉쉵堉?琉?筌??덉슦萸?? Updating User Profile")
         return "update_user_profile"
     else:
-        print(f"  > डिसीजन: Proceeding with '{intent}' plan")
-        return "initial_planner"
+        print(f"  > ?덉쉵堉?琉?筌??덉슦萸?? Proceeding with '{intent}' plan")
+        return "db_search"
 
-def should_call_tools(state: AgentState) -> str:
+def should_use_db_result(state: AgentState) -> str:
     """
-    If the initial planner created a plan, execute tools. Otherwise, chat.
+    If DB hit, return answer; otherwise continue to tool planning.
     """
-    if state.get("plan") and len(state.get("plan", [])) > 0:
-        print("  > डिसीजन: Executing Tools")
+    if state.get("db_hit"):
+        return "give_final_answer"
+    return "initial_planner"
+
+def should_execute_tools(state: AgentState) -> str:
+    """If the tool queue has items, execute next tool; otherwise move on."""
+    if state.get("tool_queue") and len(state.get("tool_queue", [])) > 0:
+        print("  > ?덉쉵堉?琉?筌??덉슦萸?? Executing Next Tool")
         return "execute_tools"
     else:
-        print("  > डिसीजन: Skipping Tools, Going to Chat")
+        print("  > ?덉쉵堉?琉?筌??덉슦萸?? No Tools, Going to Chat")
         return "check_with_8b"
 
+def should_continue_tools(state: AgentState) -> str:
+    """If tools remain, keep executing; otherwise synthesize or chat."""
+    if state.get("tool_queue") and len(state.get("tool_queue", [])) > 0:
+        return "execute_tools"
+    if state.get("tool_results") and len(state.get("tool_results", [])) > 0:
+        return "synthesize_answer"
+    return "check_with_8b"
+
 def is_answer_satisfactory(state: AgentState) -> str:
-    """
-    Routes based on the validation result from the Gemini judge.
-    """
+    """Routes based on the validation result from the Gemini judge."""
     if state.get("gemini_unavailable"):
         return "give_final_answer"
     
@@ -67,8 +79,9 @@ async def create_graph(tool_manager: MCPToolManager):
     
     # --- Add Nodes ---
     workflow.add_node("clarify_intent", partial(clarify_intent, llm=local_llm))
-    workflow.add_node("initial_planner", initial_planner)
-    workflow.add_node("update_user_profile", partial(update_user_profile, llm=local_llm)) # 추가
+    workflow.add_node("db_search", db_search)
+    workflow.add_node("initial_planner", partial(initial_planner, llm=local_llm, tools=tools))
+    workflow.add_node("update_user_profile", partial(update_user_profile, llm=local_llm))
     workflow.add_node("execute_tools", partial(execute_tools, tools=tools))
     workflow.add_node("synthesize_answer", partial(synthesize_answer, llm=local_llm))
     workflow.add_node("check_with_8b", partial(check_with_8b, llm=local_llm))
@@ -85,24 +98,43 @@ async def create_graph(tool_manager: MCPToolManager):
         route_after_intent,
         {
             "update_user_profile": "update_user_profile",
+            "db_search": "db_search"
+        }
+    )
+
+    workflow.add_conditional_edges(
+        "db_search",
+        should_use_db_result,
+        {
+            "give_final_answer": "give_final_answer",
             "initial_planner": "initial_planner"
         }
     )
     
-    # 2. The new profile node goes directly to the end
+    # 2. The profile node goes directly to the end
     workflow.add_edge("update_user_profile", "give_final_answer")
 
-    # 3. The original flow continues from the initial planner
+    # 3. Execute tools in queue order (if any)
     workflow.add_conditional_edges(
-        "initial_planner", 
-        should_call_tools,
+        "initial_planner",
+        should_execute_tools,
         {
             "execute_tools": "execute_tools",
             "check_with_8b": "check_with_8b"
         }
     )
-    
-    workflow.add_edge("execute_tools", "synthesize_answer")
+
+    # 4. Tool queue loop: execute until empty
+    workflow.add_conditional_edges(
+        "execute_tools",
+        should_continue_tools,
+        {
+            "execute_tools": "execute_tools",
+            "synthesize_answer": "synthesize_answer",
+            "check_with_8b": "check_with_8b"
+        }
+    )
+
     workflow.add_edge("synthesize_answer", "validate_answer")
     workflow.add_edge("check_with_8b", "validate_answer")
     

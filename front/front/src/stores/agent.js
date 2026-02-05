@@ -9,8 +9,9 @@ export const useAgentStore = defineStore('agent', {
     status: 'waiting', // 'waiting', 'thinking', 'streaming', 'finished', 'error'
     logs: [],
     isConnected: false,
-    nodeStates: {}, // 각 노드의 상태 (pending, running, completed, error)
-    nodeLogs: {}, // 각 노드별 로그
+    nodeStates: {}, // node status (pending, running, completed, error)
+    nodeLogs: {}, // node logs
+    lastToolResults: [],
   }),
   actions: {
     initConnection() {
@@ -31,47 +32,51 @@ export const useAgentStore = defineStore('agent', {
     },
 
     handleWebSocketMessage(data) {
-        switch (data.type) {
-            case 'connection_status':
-                this.isConnected = data.status === 'connected';
-                break;
-            case 'node_start':
-                this.updateNodeState(data.node, 'running', data.content);
-                break;
-            case 'node_end':
-                this.updateNodeState(data.node, 'completed', data.content);
-                break;
-            case 'tool_start':
-                this.logs.unshift(data.content);
-                break;
-            case 'tool_end':
-                this.logs.unshift(data.content);
-                break;
-            case 'thinking':
-                this.status = 'thinking';
-                break;
-            case 'final_answer':
-                this.status = 'streaming';
-                let lastMessage = this.messages[this.messages.length - 1];
-                if (lastMessage && lastMessage.role === 'assistant') {
-                    lastMessage.content = data.content;
-                }
-                break;
-            case 'log':
-                this.logs.unshift(data.content);
-                break;
-            case 'end':
-                this.status = 'finished';
-                break;
-            case 'error':
-                this.status = 'error';
-                this.logs.unshift(`[ERROR] ${data.content}`);
-                let lastMsg = this.messages[this.messages.length - 1];
-                 if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === '...') {
-                    lastMsg.content = `An error occurred: ${data.content}`;
-                }
-                break;
+      switch (data.type) {
+        case 'connection_status':
+          this.isConnected = data.status === 'connected';
+          break;
+        case 'node_start':
+          this.updateNodeState(data.node, 'running', data.content);
+          break;
+        case 'node_end':
+          this.updateNodeState(data.node, 'completed', data.content);
+          break;
+        case 'tool_start':
+          this.logs.unshift(data.content);
+          break;
+        case 'tool_end':
+          this.logs.unshift(data.content);
+          break;
+        case 'thinking':
+          this.status = 'thinking';
+          break;
+        case 'final_answer': {
+          this.status = 'streaming';
+          let lastMessage = this.messages[this.messages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            lastMessage.content = data.content;
+            lastMessage.tool_results = data.tool_results || [];
+          }
+          this.lastToolResults = data.tool_results || [];
+          break;
         }
+        case 'log':
+          this.logs.unshift(data.content);
+          break;
+        case 'end':
+          this.status = 'finished';
+          break;
+        case 'error': {
+          this.status = 'error';
+          this.logs.unshift(`[ERROR] ${data.content}`);
+          let lastMsg = this.messages[this.messages.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === '...') {
+            lastMsg.content = `An error occurred: ${data.content}`;
+          }
+          break;
+        }
+      }
     },
     
     async fetchSystemHealth() {
@@ -93,10 +98,10 @@ export const useAgentStore = defineStore('agent', {
 
     sendMessage(userId, message) {
       if (!this.isConnected) {
-          this.logs.unshift("[ERROR] Cannot send message: Not connected to the server.");
-          return;
+        this.logs.unshift("[ERROR] Cannot send message: Not connected to the server.");
+        return;
       }
-        
+      
       this.messages.push({ id: Date.now(), role: 'user', content: message });
       this.messages.push({ id: Date.now() + 1, role: 'assistant', content: '...' });
       this.status = 'thinking';

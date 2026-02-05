@@ -1,13 +1,29 @@
 <template>
   <div class="chat-window">
-    <div class="messages" ref="messagesContainer">
+    <div class="messages" ref="messagesContainer" @scroll="handleScroll">
       <div v-for="msg in messages" :key="msg.id" :class="['message-row', msg.role]">
         <div v-if="msg.role === 'assistant'" class="avatar assistant-avatar">
           <i class="pi pi-sparkles"></i>
         </div>
         
         <div class="message-bubble">
-           <div class="content" v-html="renderMarkdown(msg.content)"></div>
+          <div class="content" v-html="renderMarkdown(msg.content)"></div>
+          <div v-if="msg.role === 'assistant' && msg.tool_results && msg.tool_results.length" class="tool-results">
+            <div class="tool-results-title">사용한 도구</div>
+            <div v-for="(tool, idx) in msg.tool_results" :key="`${msg.id}-${idx}`" class="tool-result">
+              <div class="tool-result-header">
+                <div class="tool-name">{{ tool.tool_name || 'unknown_tool' }}</div>
+                <button
+                  class="tool-toggle"
+                  type="button"
+                  @click="toggleTool(`${msg.id}-${idx}`)"
+                >
+                  {{ isToolOpen(`${msg.id}-${idx}`) ? '접기' : '자세히보기' }}
+                </button>
+              </div>
+              <pre v-if="isToolOpen(`${msg.id}-${idx}`)" class="tool-output" v-text="tool.output"></pre>
+            </div>
+          </div>
         </div>
 
         <div v-if="msg.role === 'user'" class="avatar user-avatar">
@@ -16,26 +32,14 @@
       </div>
     </div>
 
-    <div class="input-container">
-      <div class="input-wrapper">
-        <InputText 
-          type="text" 
-          v-model="newMessage" 
-          class="modern-input"
-          placeholder="부장님, 지시사항을 입력해주세요..." 
-          @keyup.enter="handleSendMessage" 
-          :disabled="isLoading" 
-        />
-        <Button 
-          icon="pi pi-arrow-up" 
-          class="send-btn" 
-          rounded 
-          text
-          @click="handleSendMessage" 
-          :disabled="isLoading || !newMessage.trim()" 
-        />
-      </div>
-    </div>
+    <button
+      v-if="showJumpToBottom"
+      class="jump-to-bottom"
+      type="button"
+      @click="jumpToBottom"
+    >
+      새 메시지 {{ unreadCount }}개
+    </button>
   </div>
 </template>
 
@@ -43,22 +47,16 @@
 import { ref, computed, nextTick, watch } from 'vue';
 import { useAgentStore } from '../stores/agent';
 import { marked } from 'marked';
-import InputText from 'primevue/inputtext';
-import Button from 'primevue/button';
 
 const store = useAgentStore();
-const newMessage = ref('');
 const messagesContainer = ref(null);
+const isUserScrolledUp = ref(false);
+const SCROLL_THRESHOLD = 32;
+const unreadCount = ref(0);
+const expandedTools = ref({});
 
 const messages = computed(() => store.messages);
-const isLoading = computed(() => store.status !== 'finished' && store.status !== 'waiting' && store.status !== 'error');
-
-const handleSendMessage = () => {
-  if (newMessage.value.trim() !== '') {
-    store.sendMessage(1, newMessage.value); // Send user_id as an integer
-    newMessage.value = '';
-  }
-};
+const showJumpToBottom = computed(() => isUserScrolledUp.value && unreadCount.value > 0);
 
 const renderMarkdown = (content) => {
   return marked(content);
@@ -67,34 +65,68 @@ const renderMarkdown = (content) => {
 watch(messages, () => {
   nextTick(() => {
     if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+      if (!isUserScrolledUp.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+        unreadCount.value = 0;
+      } else {
+        unreadCount.value += 1;
+      }
     }
   });
 }, { deep: true });
+
+const handleScroll = () => {
+  const container = messagesContainer.value;
+  if (!container) return;
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+  isUserScrolledUp.value = distanceFromBottom > SCROLL_THRESHOLD;
+  if (!isUserScrolledUp.value) {
+    unreadCount.value = 0;
+  }
+};
+
+const jumpToBottom = () => {
+  const container = messagesContainer.value;
+  if (!container) return;
+  container.scrollTop = container.scrollHeight;
+  unreadCount.value = 0;
+  isUserScrolledUp.value = false;
+};
+
+const toggleTool = (key) => {
+  expandedTools.value[key] = !expandedTools.value[key];
+};
+
+const isToolOpen = (key) => {
+  return !!expandedTools.value[key];
+};
 </script>
 
 <style scoped>
-/* 전체 레이아웃 & 배경 */
+/* Overall layout & background */
 .chat-window {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: #121212; /* Deep Dark Background */
-  font-family: 'Pretendard', sans-serif; /* Modern Font recommendation */
+  background-color: #121212;
+  font-family: 'Pretendard', sans-serif;
   color: #e0e0e0;
+  min-height: 0;
+  position: relative;
 }
 
-/* 메시지 영역 */
+/* Message area */
 .messages {
-  flex-grow: 1;
+  flex: 1 1 auto;
   padding: 2rem;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  min-height: 0;
 }
 
-/* 스크롤바 커스텀 */
+/* Scrollbar */
 .messages::-webkit-scrollbar {
   width: 6px;
 }
@@ -103,7 +135,7 @@ watch(messages, () => {
   border-radius: 3px;
 }
 
-/* 메시지 행 (배치) */
+/* Message rows */
 .message-row {
   display: flex;
   align-items: flex-end;
@@ -113,19 +145,19 @@ watch(messages, () => {
 }
 
 .message-row.user {
-  align-self: flex-end; /* 오른쪽 정렬 */
-  flex-direction: row; /* 아바타 우측 배치 */
+  align-self: flex-end;
+  flex-direction: row;
 }
 
 .message-row.assistant {
-  align-self: flex-start; /* 왼쪽 정렬 */
+  align-self: flex-start;
 }
 
-/* 아바타 스타일 */
+/* Avatars */
 .avatar {
   width: 36px;
   height: 36px;
-  border-radius: 12px; /* Soft square */
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,7 +176,7 @@ watch(messages, () => {
   color: #fff;
 }
 
-/* 말풍선 스타일 */
+/* Bubbles */
 .message-bubble {
   padding: 12px 18px;
   border-radius: 18px;
@@ -154,22 +186,20 @@ watch(messages, () => {
   position: relative;
 }
 
-/* User Bubble: 강조색 */
 .message-row.user .message-bubble {
   background-color: #2b5cff;
   color: #ffffff;
-  border-bottom-right-radius: 4px; /* 말꼬리 효과 */
+  border-bottom-right-radius: 4px;
 }
 
-/* Assistant Bubble: 다크 그레이 */
 .message-row.assistant .message-bubble {
   background-color: #2a2a2a;
   color: #e0e0e0;
-  border-bottom-left-radius: 4px; /* 말꼬리 효과 */
+  border-bottom-left-radius: 4px;
   border: 1px solid #3a3a3a;
 }
 
-/* Markdown Content 내부 스타일링 */
+/* Markdown styling */
 .content :deep(p) {
   margin: 0;
 }
@@ -180,65 +210,89 @@ watch(messages, () => {
   font-family: monospace;
 }
 
-/* 입력 영역 (Floating Style) */
-.input-container {
-  padding: 1.5rem;
-  background: linear-gradient(to top, #121212 80%, transparent); /* Fade out top */
+.tool-results {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.input-wrapper {
+.tool-results-title {
+  font-size: 0.8rem;
+  color: #9aa0a6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-result {
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.tool-result-header {
   display: flex;
   align-items: center;
-  background-color: #1e1e1e;
-  border: 1px solid #333;
-  border-radius: 30px;
-  padding: 6px 6px 6px 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-  transition: border-color 0.3s;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.input-wrapper:focus-within {
-  border-color: #4facfe;
+.tool-name {
+  font-size: 0.85rem;
+  color: #dfe4ea;
+  font-weight: 600;
 }
 
-.modern-input {
-  flex-grow: 1;
+.tool-toggle {
   background: transparent;
-  border: none;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #cfd8dc;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.tool-toggle:hover {
+  border-color: #4facfe;
+  color: #ffffff;
+}
+
+.tool-output {
+  margin-top: 8px;
+  background: rgba(0,0,0,0.45);
+  border-radius: 8px;
+  padding: 10px;
+  color: #e0e0e0;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jump-to-bottom {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  background: #2b5cff;
   color: #fff;
-  font-size: 1rem;
-  padding: 8px 0;
-  outline: none;
-  box-shadow: none !important; /* PrimeVue default override */
-}
-
-.modern-input::placeholder {
-  color: #666;
-}
-
-.send-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background-color: #2b5cff !important;
-  color: white !important;
-  margin-left: 8px;
-  transition: transform 0.2s, background-color 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  cursor: pointer;
 }
 
-.send-btn:hover:not(:disabled) {
-  background-color: #1a45d6 !important;
-  transform: scale(1.05);
+.jump-to-bottom:hover {
+  background: #1a45d6;
 }
 
-.send-btn:disabled {
-  background-color: #333 !important;
-  color: #666 !important;
-  cursor: not-allowed;
+.jump-to-bottom:active {
+  transform: translateY(1px);
 }
 
 @keyframes fadeIn {

@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 # Internal Imports
 from .web_search import get_web_search_tool
@@ -98,6 +98,20 @@ class MCPToolManager:
             try:
                 result = await session.list_tools()
                 for tool in result.tools:
+                    tool_schema = getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None) or {}
+                    schema_props = tool_schema.get("properties", {}) if isinstance(tool_schema, dict) else {}
+                    required = set(tool_schema.get("required", [])) if isinstance(tool_schema, dict) else set()
+
+                    if schema_props:
+                        fields = {}
+                        for key, spec in schema_props.items():
+                            description = spec.get("description", "") if isinstance(spec, dict) else ""
+                            default_value = ... if key in required else None
+                            fields[key] = (Any, Field(default_value, description=description))
+                        args_schema = create_model(f"{server_name}_{tool.name}_Schema", **fields)
+                    else:
+                        args_schema = None
+
                     async def _tool_func(
                         session=session, 
                         tool_name=tool.name, 
@@ -110,6 +124,7 @@ class MCPToolManager:
                         coroutine=_tool_func,
                         name=f"{server_name}__{tool.name}",
                         description=tool.description or "",
+                        args_schema=args_schema
                     )
                     all_tools.append(lc_tool)
             except Exception as e:

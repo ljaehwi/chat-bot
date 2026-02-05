@@ -12,13 +12,20 @@
     </Toolbar>
 
     <Splitter class="app-splitter">
-      <SplitterPanel class="p-splitterpanel" :size="20" :min-size="15">
+      <SplitterPanel class="p-splitterpanel scroll-panel" :size="20" :min-size="15">
         <SessionSidebar />
       </SplitterPanel>
-      <SplitterPanel class="p-splitterpanel" :size="50" :min-size="40">
-        <ChatWindow />
+      <SplitterPanel class="p-splitterpanel chat-splitter-panel" :size="50" :min-size="40">
+        <Splitter layout="vertical" class="chat-vertical-splitter">
+          <SplitterPanel class="p-splitterpanel chat-messages-panel" :size="80" :min-size="60">
+            <ChatWindow class="chat-window-panel" />
+          </SplitterPanel>
+          <SplitterPanel class="p-splitterpanel chat-input-panel" :size="20" :min-size="10">
+            <ChatInput class="chat-input-panel-inner" />
+          </SplitterPanel>
+        </Splitter>
       </SplitterPanel>
-      <SplitterPanel class="p-splitterpanel" :size="30" :min-size="20">
+      <SplitterPanel class="p-splitterpanel scroll-panel" :size="30" :min-size="20">
         <AgentStatus />
       </SplitterPanel>
     </Splitter>
@@ -35,6 +42,7 @@ import SplitterPanel from 'primevue/splitterpanel';
 
 import SessionSidebar from './components/SessionSidebar.vue';
 import ChatWindow from './components/ChatWindow.vue';
+import ChatInput from './components/ChatInput.vue';
 import AgentStatus from './components/AgentStatus.vue';
 
 // Initialize the agent store
@@ -48,6 +56,10 @@ onMounted(() => {
 
 <style>
 /* Global Styles */
+html, body, #app {
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -82,13 +94,48 @@ body {
 /* Make splitter fill remaining height */
 .app-splitter {
   flex-grow: 1;
+  min-height: 0;
+  height: 100%;
   border: none;
 }
 
 /* Style splitter panels to have a dark background */
 .p-splitter-panel {
   background-color: #1e1e1e;
-  overflow: auto; /* Allow scrolling within panels */
+  min-height: 0;
+}
+
+.p-splitter {
+  min-height: 0;
+  height: 100%;
+}
+
+.scroll-panel {
+  overflow: auto;
+}
+
+.chat-splitter-panel {
+  overflow: hidden;
+}
+
+.chat-vertical-splitter {
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-messages-panel,
+.chat-input-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-window-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-input-panel-inner {
+  height: 100%;
 }
 
 /* PrimeVue Component Overrides */
